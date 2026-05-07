@@ -49,3 +49,15 @@ export function addSnapshot(store: SnapshotStore, snapshot: EnvSnapshot): Snapsh
 export function removeSnapshot(store: SnapshotStore, id: string): SnapshotStore {
   return { snapshots: store.snapshots.filter((s) => s.id !== id) };
 }
+
+/**
+ * Returns the most recent snapshot for a given layer, or undefined if none exist.
+ */
+export function latestSnapshotForLayer(
+  store: SnapshotStore,
+  layer: string
+): EnvSnapshot | undefined {
+  return store.snapshots
+    .filter((s) => s.layer === layer)
+    .sort((a, b) => b.timestamp - a.timestamp)[0];
+}
