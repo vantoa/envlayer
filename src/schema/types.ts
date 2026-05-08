@@ -1,32 +1,32 @@
-export type SchemaFieldType = 'string' | 'number' | 'boolean' | 'url' | 'email' | 'enum';
+export type FieldType = 'string' | 'number' | 'boolean' | 'url' | 'email' | 'enum';
 
-export interface SchemaField {
-  type: SchemaFieldType;
+export interface FieldSchema {
+  type: FieldType;
   required?: boolean;
   default?: string;
-  description?: string;
   enum?: string[];
-  pattern?: RegExp;
+  pattern?: string;
+  description?: string;
+  secret?: boolean;
 }
 
 export interface EnvSchema {
-  [key: string]: SchemaField;
-}
-
-export interface SchemaValidationResult {
-  valid: boolean;
-  errors: SchemaValidationError[];
-  warnings: SchemaValidationWarning[];
+  [key: string]: FieldSchema;
 }
 
 export interface SchemaValidationError {
   key: string;
   message: string;
-  expected?: string;
   received?: string;
 }
 
-export interface SchemaValidationWarning {
-  key: string;
-  message: string;
+export interface SchemaValidationResult {
+  valid: boolean;
+  errors: SchemaValidationError[];
+  coerced: Record<string, string>;
+}
+
+export interface SchemaApplyResult {
+  env: Record<string, string>;
+  applied: string[];
 }

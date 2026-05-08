@@ -1,83 +1,101 @@
-import { validateAgainstSchema, applyDefaults } from '../schemaValidator';
-import type { EnvSchema } from '../types';
+import { validateField, validateAgainstSchema, applyDefaults } from '../schemaValidator';
+import { EnvSchema } from '../types';
 
-const schema: EnvSchema = {
-  PORT: { type: 'number', required: true },
-  NODE_ENV: { type: 'enum', required: true, enum: ['development', 'production', 'test'] },
-  API_URL: { type: 'url', required: false, default: 'http://localhost:3000' },
-  ADMIN_EMAIL: { type: 'email', required: false },
-  DEBUG: { type: 'boolean', required: false },
-  APP_NAME: { type: 'string', required: true, pattern: /^[a-z][a-z0-9-]+$/ },
-};
+describe('validateField', () => {
+  it('returns null for valid string', () => {
+    expect(validateField('KEY', 'hello', { type: 'string' })).toBeNull();
+  });
+
+  it('returns error for missing required field', () => {
+    const err = validateField('KEY', undefined, { type: 'string', required: true });
+    expect(err).not.toBeNull();
+    expect(err?.key).toBe('KEY');
+  });
+
+  it('returns null for missing optional field', () => {
+    expect(validateField('KEY', undefined, { type: 'string' })).toBeNull();
+  });
+
+  it('validates number type', () => {
+    expect(validateField('PORT', '3000', { type: 'number' })).toBeNull();
+    expect(validateField('PORT', 'abc', { type: 'number' })).not.toBeNull();
+  });
+
+  it('validates boolean type', () => {
+    expect(validateField('FLAG', 'true', { type: 'boolean' })).toBeNull();
+    expect(validateField('FLAG', '1', { type: 'boolean' })).toBeNull();
+    expect(validateField('FLAG', 'yes', { type: 'boolean' })).not.toBeNull();
+  });
+
+  it('validates url type', () => {
+    expect(validateField('URL', 'https://example.com', { type: 'url' })).toBeNull();
+    expect(validateField('URL', 'not-a-url', { type: 'url' })).not.toBeNull();
+  });
+
+  it('validates email type', () => {
+    expect(validateField('EMAIL', 'user@example.com', { type: 'email' })).toBeNull();
+    expect(validateField('EMAIL', 'bad-email', { type: 'email' })).not.toBeNull();
+  });
+
+  it('validates enum type', () => {
+    const schema = { type: 'enum' as const, enum: ['dev', 'prod', 'test'] };
+    expect(validateField('ENV', 'dev', schema)).toBeNull();
+    expect(validateField('ENV', 'staging', schema)).not.toBeNull();
+  });
+
+  it('validates string pattern', () => {
+    const schema = { type: 'string' as const, pattern: '^v\\d+\\.\\d+' };
+    expect(validateField('VERSION', 'v1.2', schema)).toBeNull();
+    expect(validateField('VERSION', '1.2', schema)).not.toBeNull();
+  });
+});
 
 describe('validateAgainstSchema', () => {
-  it('passes with a valid env map', () => {
-    const env = { PORT: '3000', NODE_ENV: 'production', APP_NAME: 'my-app' };
-    const result = validateAgainstSchema(env, schema);
+  const schema: EnvSchema = {
+    PORT: { type: 'number', required: true },
+    NODE_ENV: { type: 'enum', enum: ['development', 'production', 'test'] },
+    DEBUG: { type: 'boolean' }
+  };
+
+  it('returns valid for correct env', () => {
+    const result = validateAgainstSchema(
+      { PORT: '3000', NODE_ENV: 'development', DEBUG: 'true' },
+      schema
+    );
     expect(result.valid).toBe(true);
     expect(result.errors).toHaveLength(0);
   });
 
-  it('reports missing required fields', () => {
-    const env = { NODE_ENV: 'development', APP_NAME: 'my-app' };
-    const result = validateAgainstSchema(env, schema);
+  it('returns errors for invalid env', () => {
+    const result = validateAgainstSchema({ PORT: 'abc', NODE_ENV: 'staging' }, schema);
     expect(result.valid).toBe(false);
-    expect(result.errors.some(e => e.key === 'PORT')).toBe(true);
+    expect(result.errors.length).toBeGreaterThanOrEqual(2);
   });
 
-  it('reports invalid number', () => {
-    const env = { PORT: 'abc', NODE_ENV: 'test', APP_NAME: 'my-app' };
-    const result = validateAgainstSchema(env, schema);
-    expect(result.errors.some(e => e.key === 'PORT')).toBe(true);
-  });
-
-  it('reports invalid enum value', () => {
-    const env = { PORT: '8080', NODE_ENV: 'staging', APP_NAME: 'my-app' };
-    const result = validateAgainstSchema(env, schema);
-    expect(result.errors.some(e => e.key === 'NODE_ENV')).toBe(true);
-  });
-
-  it('reports invalid URL', () => {
-    const env = { PORT: '3000', NODE_ENV: 'test', APP_NAME: 'my-app', API_URL: 'not-a-url' };
-    const result = validateAgainstSchema(env, schema);
-    expect(result.errors.some(e => e.key === 'API_URL')).toBe(true);
-  });
-
-  it('reports invalid email', () => {
-    const env = { PORT: '3000', NODE_ENV: 'test', APP_NAME: 'my-app', ADMIN_EMAIL: 'not-email' };
-    const result = validateAgainstSchema(env, schema);
-    expect(result.errors.some(e => e.key === 'ADMIN_EMAIL')).toBe(true);
-  });
-
-  it('reports invalid boolean', () => {
-    const env = { PORT: '3000', NODE_ENV: 'test', APP_NAME: 'my-app', DEBUG: 'yes' };
-    const result = validateAgainstSchema(env, schema);
-    expect(result.errors.some(e => e.key === 'DEBUG')).toBe(true);
-  });
-
-  it('reports warning for missing optional field with default', () => {
-    const env = { PORT: '3000', NODE_ENV: 'test', APP_NAME: 'my-app' };
-    const result = validateAgainstSchema(env, schema);
-    expect(result.warnings.some(w => w.key === 'API_URL')).toBe(true);
-  });
-
-  it('reports pattern mismatch for string field', () => {
-    const env = { PORT: '3000', NODE_ENV: 'test', APP_NAME: 'My App!' };
-    const result = validateAgainstSchema(env, schema);
-    expect(result.errors.some(e => e.key === 'APP_NAME')).toBe(true);
+  it('coerces boolean values', () => {
+    const result = validateAgainstSchema({ PORT: '3000', DEBUG: '1' }, schema);
+    expect(result.coerced['DEBUG']).toBe('true');
   });
 });
 
 describe('applyDefaults', () => {
-  it('fills in missing fields with defaults', () => {
-    const env = { PORT: '3000', NODE_ENV: 'test', APP_NAME: 'my-app' };
-    const result = applyDefaults(env, schema);
-    expect(result.API_URL).toBe('http://localhost:3000');
+  const schema: EnvSchema = {
+    PORT: { type: 'number', default: '3000' },
+    HOST: { type: 'string', default: 'localhost' },
+    SECRET: { type: 'string', required: true }
+  };
+
+  it('applies defaults for missing keys', () => {
+    const result = applyDefaults({ SECRET: 'abc' }, schema);
+    expect(result.env['PORT']).toBe('3000');
+    expect(result.env['HOST']).toBe('localhost');
+    expect(result.applied).toContain('PORT');
+    expect(result.applied).toContain('HOST');
   });
 
-  it('does not overwrite existing values', () => {
-    const env = { PORT: '3000', NODE_ENV: 'test', APP_NAME: 'my-app', API_URL: 'https://api.example.com' };
-    const result = applyDefaults(env, schema);
-    expect(result.API_URL).toBe('https://api.example.com');
+  it('does not override existing values', () => {
+    const result = applyDefaults({ PORT: '8080', SECRET: 'abc' }, schema);
+    expect(result.env['PORT']).toBe('8080');
+    expect(result.applied).not.toContain('PORT');
   });
 });
