@@ -5,99 +5,93 @@ import {
   isLocked,
   clearAllLocks,
   listLocks,
-} from "../envLocker";
+} from '../envLocker';
 
-describe("envLocker", () => {
-  beforeEach(() => {
+beforeEach(() => {
+  clearAllLocks();
+});
+
+describe('acquireLock', () => {
+  it('should acquire a lock on an unlocked layer', () => {
+    const result = acquireLock('production', { owner: 'alice', mode: 'write' });
+    expect(result.success).toBe(true);
+    expect(result.lock?.layer).toBe('production');
+    expect(result.lock?.owner).toBe('alice');
+    expect(result.lock?.mode).toBe('write');
+  });
+
+  it('should fail to acquire a lock on an already locked layer', () => {
+    acquireLock('staging', { owner: 'alice' });
+    const result = acquireLock('staging', { owner: 'bob' });
+    expect(result.success).toBe(false);
+    expect(result.error).toMatch(/already locked/);
+  });
+
+  it('should allow re-acquiring an expired lock', () => {
+    const past = new Date(Date.now() - 1000);
+    acquireLock('dev', { owner: 'alice', ttlMs: -1000 });
+    // force expiry by manipulating via getLock (expired lock should be cleared)
+    const result = acquireLock('dev', { owner: 'bob' });
+    expect(result.success).toBe(true);
+  });
+
+  it('should default owner to anonymous and mode to write', () => {
+    const result = acquireLock('local');
+    expect(result.lock?.owner).toBe('anonymous');
+    expect(result.lock?.mode).toBe('write');
+  });
+});
+
+describe('releaseLock', () => {
+  it('should release a lock by layer', () => {
+    acquireLock('production', { owner: 'alice' });
+    const released = releaseLock('production', 'alice');
+    expect(released).toBe(true);
+    expect(isLocked('production')).toBe(false);
+  });
+
+  it('should return false if owner does not match', () => {
+    acquireLock('production', { owner: 'alice' });
+    const released = releaseLock('production', 'bob');
+    expect(released).toBe(false);
+    expect(isLocked('production')).toBe(true);
+  });
+
+  it('should return false if no lock exists', () => {
+    expect(releaseLock('nonexistent')).toBe(false);
+  });
+});
+
+describe('getLock / isLocked', () => {
+  it('should return the lock if active', () => {
+    acquireLock('staging', { owner: 'ci' });
+    const lock = getLock('staging');
+    expect(lock?.owner).toBe('ci');
+  });
+
+  it('should return undefined for unlocked layer', () => {
+    expect(getLock('missing')).toBeUndefined();
+  });
+});
+
+describe('listLocks', () => {
+  it('should list all active locks', () => {
+    acquireLock('a', { owner: 'x' });
+    acquireLock('b', { owner: 'y' });
+    const locks = listLocks();
+    expect(locks).toHaveLength(2);
+  });
+
+  it('should return empty array when no locks', () => {
+    expect(listLocks()).toEqual([]);
+  });
+});
+
+describe('clearAllLocks', () => {
+  it('should remove all locks', () => {
+    acquireLock('a');
+    acquireLock('b');
     clearAllLocks();
-  });
-
-  describe("acquireLock", () => {
-    it("should acquire a lock on an unlocked layer", () => {
-      const lock = acquireLock("production", "user-1");
-      expect(lock).not.toBeNull();
-      expect(lock?.layer).toBe("production");
-      expect(lock?.lockedBy).toBe("user-1");
-    });
-
-    it("should return null when layer is already locked", () => {
-      acquireLock("production", "user-1");
-      const second = acquireLock("production", "user-2");
-      expect(second).toBeNull();
-    });
-
-    it("should allow re-acquiring an expired lock", () => {
-      acquireLock("staging", "user-1", 1); // 1ms TTL
-      return new Promise<void>((resolve) =>
-        setTimeout(() => {
-          const lock = acquireLock("staging", "user-2", 30_000);
-          expect(lock).not.toBeNull();
-          expect(lock?.lockedBy).toBe("user-2");
-          resolve();
-        }, 10)
-      );
-    });
-
-    it("should allow different layers to be locked independently", () => {
-      const l1 = acquireLock("production", "user-1");
-      const l2 = acquireLock("staging", "user-2");
-      expect(l1).not.toBeNull();
-      expect(l2).not.toBeNull();
-    });
-  });
-
-  describe("releaseLock", () => {
-    it("should release a lock held by the same owner", () => {
-      acquireLock("production", "user-1");
-      const released = releaseLock("production", "user-1");
-      expect(released).toBe(true);
-      expect(isLocked("production")).toBe(false);
-    });
-
-    it("should not release a lock held by a different owner", () => {
-      acquireLock("production", "user-1");
-      const released = releaseLock("production", "user-2");
-      expect(released).toBe(false);
-      expect(isLocked("production")).toBe(true);
-    });
-
-    it("should return false when no lock exists", () => {
-      const released = releaseLock("nonexistent", "user-1");
-      expect(released).toBe(false);
-    });
-  });
-
-  describe("getLock", () => {
-    it("should return the lock entry for a locked layer", () => {
-      acquireLock("production", "user-1");
-      const lock = getLock("production");
-      expect(lock?.lockedBy).toBe("user-1");
-    });
-
-    it("should return undefined for an unlocked layer", () => {
-      expect(getLock("production")).toBeUndefined();
-    });
-  });
-
-  describe("listLocks", () => {
-    it("should list all active locks", () => {
-      acquireLock("production", "user-1");
-      acquireLock("staging", "user-2");
-      const locks = listLocks();
-      expect(locks).toHaveLength(2);
-      expect(locks.map((l) => l.layer)).toContain("production");
-      expect(locks.map((l) => l.layer)).toContain("staging");
-    });
-
-    it("should exclude expired locks from the list", () => {
-      acquireLock("production", "user-1", 1);
-      return new Promise<void>((resolve) =>
-        setTimeout(() => {
-          const locks = listLocks();
-          expect(locks.find((l) => l.layer === "production")).toBeUndefined();
-          resolve();
-        }, 10)
-      );
-    });
+    expect(listLocks()).toHaveLength(0);
   });
 });

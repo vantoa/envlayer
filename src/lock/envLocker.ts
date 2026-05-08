@@ -1,62 +1,59 @@
-/**
- * envLocker.ts
- * Provides locking mechanism to prevent concurrent modifications to env layers.
- */
+import { EnvLock, LockMode, LockOptions, LockResult, LockStore } from './types';
 
-export interface LockEntry {
-  layer: string;
-  lockedAt: number;
-  lockedBy: string;
-  ttl: number; // time-to-live in milliseconds
+const lockStore: LockStore = {};
+
+export function generateLockId(): string {
+  return `lock_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 }
-
-const lockStore = new Map<string, LockEntry>();
 
 export function acquireLock(
   layer: string,
-  lockedBy: string,
-  ttl = 30_000
-): LockEntry | null {
-  const existing = lockStore.get(layer);
+  options: LockOptions = {}
+): LockResult {
+  const existing = lockStore[layer];
 
   if (existing) {
-    const expired = Date.now() > existing.lockedAt + existing.ttl;
-    if (!expired) {
-      return null; // lock is held by someone else
+    if (existing.expiresAt && existing.expiresAt < new Date()) {
+      delete lockStore[layer];
+    } else {
+      return {
+        success: false,
+        error: `Layer "${layer}" is already locked by "${existing.owner}" in ${existing.mode} mode`,
+      };
     }
   }
 
-  const entry: LockEntry = {
+  const now = new Date();
+  const lock: EnvLock = {
+    id: generateLockId(),
     layer,
-    lockedBy,
-    lockedAt: Date.now(),
-    ttl,
+    mode: options.mode ?? 'write',
+    owner: options.owner ?? 'anonymous',
+    acquiredAt: now,
+    expiresAt: options.ttlMs ? new Date(now.getTime() + options.ttlMs) : undefined,
+    metadata: options.metadata,
   };
 
-  lockStore.set(layer, entry);
-  return entry;
+  lockStore[layer] = lock;
+  return { success: true, lock };
 }
 
-export function releaseLock(layer: string, lockedBy: string): boolean {
-  const existing = lockStore.get(layer);
-  if (!existing || existing.lockedBy !== lockedBy) {
-    return false;
-  }
-  lockStore.delete(layer);
+export function releaseLock(layer: string, owner?: string): boolean {
+  const lock = lockStore[layer];
+  if (!lock) return false;
+  if (owner && lock.owner !== owner) return false;
+  delete lockStore[layer];
   return true;
 }
 
-export function getLock(layer: string): LockEntry | undefined {
-  const entry = lockStore.get(layer);
-  if (!entry) return undefined;
-
-  const expired = Date.now() > entry.lockedAt + entry.ttl;
-  if (expired) {
-    lockStore.delete(layer);
+export function getLock(layer: string): EnvLock | undefined {
+  const lock = lockStore[layer];
+  if (!lock) return undefined;
+  if (lock.expiresAt && lock.expiresAt < new Date()) {
+    delete lockStore[layer];
     return undefined;
   }
-
-  return entry;
+  return lock;
 }
 
 export function isLocked(layer: string): boolean {
@@ -64,20 +61,12 @@ export function isLocked(layer: string): boolean {
 }
 
 export function clearAllLocks(): void {
-  lockStore.clear();
+  Object.keys(lockStore).forEach((key) => delete lockStore[key]);
 }
 
-export function listLocks(): LockEntry[] {
-  const now = Date.now();
-  const active: LockEntry[] = [];
-
-  for (const [layer, entry] of lockStore.entries()) {
-    if (now <= entry.lockedAt + entry.ttl) {
-      active.push(entry);
-    } else {
-      lockStore.delete(layer);
-    }
-  }
-
-  return active;
+export function listLocks(): EnvLock[] {
+  const now = new Date();
+  return Object.values(lockStore).filter(
+    (lock) => !lock.expiresAt || lock.expiresAt >= now
+  );
 }
