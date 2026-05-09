@@ -47,6 +47,15 @@ describe('validateEnv', () => {
     expect(result.valid).toBe(false);
     expect(result.errors.some((e) => e.includes('NODE_ENV'))).toBe(true);
   });
+
+  it('accumulates multiple errors when multiple rules fail', () => {
+    const env: EnvMap = { PORT: 'not-a-number', NODE_ENV: 'staging' };
+    const result = validateEnv(env, rules);
+    expect(result.valid).toBe(false);
+    expect(result.errors.some((e) => e.includes('DATABASE_URL'))).toBe(true);
+    expect(result.errors.some((e) => e.includes('PORT'))).toBe(true);
+    expect(result.errors.some((e) => e.includes('NODE_ENV'))).toBe(true);
+  });
 });
 
 describe('assertValidEnv', () => {
@@ -85,5 +94,7 @@ describe('checkRequiredKeys', () => {
     const env: EnvMap = { FOO: '' };
     const result = checkRequiredKeys(env, ['FOO']);
     expect(result.valid).toBe(false);
+    expect(result.errors).toHaveLength(1);
+    expect(result.errors[0]).toContain('FOO');
   });
 });
