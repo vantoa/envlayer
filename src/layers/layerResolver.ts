@@ -9,6 +9,10 @@ export function buildLayerChain(layers: Layer[], targetLayer: string): Layer[] {
   const chain: Layer[] = [];
   let current = layerMap.get(targetLayer);
 
+  if (!current) {
+    throw new Error(`Layer "${targetLayer}" not found`);
+  }
+
   const visited = new Set<string>();
   while (current) {
     if (visited.has(current.name)) {
