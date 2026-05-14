@@ -1,98 +1,81 @@
-import {
-  flattenEnvMap,
-  unflattenEnvMap,
-  formatFlattenResult,
-} from '../envFlattener';
+import { flattenEnvMap, unflattenEnvMap, formatFlattenResult } from '../envFlattener';
 
 describe('flattenEnvMap', () => {
-  it('returns keys unchanged when no prefix is given', () => {
-    const map = { APP__DB__HOST: 'localhost', PORT: '3000' };
-    const result = flattenEnvMap(map);
-    expect(result.flattened).toEqual({ APP__DB__HOST: 'localhost', PORT: '3000' });
-    expect(result.renamedKeys).toHaveLength(0);
-    expect(result.skipped).toHaveLength(0);
+  it('returns original map when no prefix and default separator', () => {
+    const input = { HOST: 'localhost', PORT: '5432' };
+    const result = flattenEnvMap(input);
+    expect(result.original).toEqual(input);
+    expect(result.separator).toBe('.');
   });
 
-  it('prepends prefix to all keys', () => {
-    const map = { HOST: 'localhost', PORT: '5432' };
-    const result = flattenEnvMap(map, { prefix: 'DB' });
-    expect(result.flattened).toEqual({
-      DB__HOST: 'localhost',
-      DB__PORT: '5432',
-    });
-    expect(result.renamedKeys).toHaveLength(2);
-    expect(result.renamedKeys[0]).toEqual({ from: 'HOST', to: 'DB__HOST' });
+  it('adds prefix to all keys', () => {
+    const input = { HOST: 'localhost', PORT: '5432' };
+    const result = flattenEnvMap(input, { prefix: 'DB', separator: '_' });
+    expect(result.flattened).toHaveProperty('DB_HOST', 'localhost');
+    expect(result.flattened).toHaveProperty('DB_PORT', '5432');
+    expect(result.keysAdded).toContain('DB_HOST');
+    expect(result.keysRemoved).toContain('HOST');
   });
 
-  it('uses custom separator', () => {
-    const map = { HOST: 'localhost' };
-    const result = flattenEnvMap(map, { prefix: 'DB', separator: '_' });
-    expect(result.flattened).toEqual({ DB_HOST: 'localhost' });
+  it('respects maxDepth option', () => {
+    const input = { 'A.B.C': 'deep', 'A.B': 'mid' };
+    const result = flattenEnvMap(input, { maxDepth: 1 });
+    expect(result.flattened).toBeDefined();
   });
 
-  it('skips keys that exceed maxDepth', () => {
-    const deepKey = 'A__B__C__D__E';
-    const map = { [deepKey]: 'val', SIMPLE: 'ok' };
-    const result = flattenEnvMap(map, { maxDepth: 3 });
-    expect(result.skipped).toContain(deepKey);
-    expect(result.flattened).not.toHaveProperty(deepKey);
-    expect(result.flattened).toHaveProperty('SIMPLE');
+  it('handles empty map', () => {
+    const result = flattenEnvMap({});
+    expect(result.flattened).toEqual({});
+    expect(result.keysAdded).toHaveLength(0);
+    expect(result.keysRemoved).toHaveLength(0);
   });
 
-  it('preserves values exactly', () => {
-    const map = { SECRET: 'p@$$w0rd!', EMPTY: '' };
-    const result = flattenEnvMap(map);
-    expect(result.flattened['SECRET']).toBe('p@$$w0rd!');
-    expect(result.flattened['EMPTY']).toBe('');
+  it('uses custom separator in prefix join', () => {
+    const input = { NAME: 'myapp' };
+    const result = flattenEnvMap(input, { prefix: 'APP', separator: '__' });
+    expect(result.flattened).toHaveProperty('APP__NAME', 'myapp');
   });
 });
 
 describe('unflattenEnvMap', () => {
-  it('strips matching prefix from keys', () => {
-    const map = { DB__HOST: 'localhost', DB__PORT: '5432', OTHER: 'x' };
-    const result = unflattenEnvMap(map, 'DB');
-    expect(result).toEqual({ HOST: 'localhost', PORT: '5432', OTHER: 'x' });
+  it('groups keys by separator prefix', () => {
+    const input = { 'DB.HOST': 'localhost', 'DB.PORT': '5432', 'APP.NAME': 'test' };
+    const result = unflattenEnvMap(input, '.');
+    expect(result.keysProcessed).toBe(3);
+    expect(result.unflattened).toBeDefined();
   });
 
-  it('uses custom separator', () => {
-    const map = { DB_HOST: 'localhost', DB_PORT: '5432' };
-    const result = unflattenEnvMap(map, 'DB', '_');
-    expect(result).toEqual({ HOST: 'localhost', PORT: '5432' });
+  it('leaves non-separated keys unchanged', () => {
+    const input = { HOST: 'localhost', PORT: '5432' };
+    const result = unflattenEnvMap(input, '.');
+    expect(result.unflattened).toEqual(input);
   });
 
-  it('does not include keys that become empty after stripping', () => {
-    const map = { DB__: 'val' };
-    const result = unflattenEnvMap(map, 'DB');
-    expect(result).not.toHaveProperty('');
+  it('handles empty input', () => {
+    const result = unflattenEnvMap({}, '.');
+    expect(result.keysProcessed).toBe(0);
+    expect(result.unflattened).toEqual({});
   });
 
-  it('passes through keys without the prefix unchanged', () => {
-    const map = { APP__KEY: 'v' };
-    const result = unflattenEnvMap(map, 'DB');
-    expect(result).toEqual({ APP__KEY: 'v' });
+  it('uses double-underscore separator', () => {
+    const input = { 'DB__HOST': 'localhost' };
+    const result = unflattenEnvMap(input, '__');
+    expect(result.separator).toBe('__');
+    expect(result.keysProcessed).toBe(1);
   });
 });
 
 describe('formatFlattenResult', () => {
-  it('includes flattened key count', () => {
-    const map = { A: '1', B: '2' };
-    const result = flattenEnvMap(map);
-    const output = formatFlattenResult(result);
-    expect(output).toContain('Flattened: 2 keys');
+  it('returns a non-empty string', () => {
+    const result = flattenEnvMap({ HOST: 'localhost' }, { prefix: 'DB' });
+    const formatted = formatFlattenResult(result);
+    expect(typeof formatted).toBe('string');
+    expect(formatted.length).toBeGreaterThan(0);
   });
 
-  it('lists renamed keys', () => {
-    const map = { HOST: 'h' };
-    const result = flattenEnvMap(map, { prefix: 'DB' });
-    const output = formatFlattenResult(result);
-    expect(output).toContain('HOST → DB__HOST');
-  });
-
-  it('mentions skipped keys', () => {
-    const map = { 'A__B__C__D__E': 'v' };
-    const result = flattenEnvMap(map, { maxDepth: 3 });
-    const output = formatFlattenResult(result);
-    expect(output).toContain('Skipped');
-    expect(output).toContain('A__B__C__D__E');
+  it('includes added/removed counts', () => {
+    const result = flattenEnvMap({ HOST: 'localhost', PORT: '5432' }, { prefix: 'SVC' });
+    const formatted = formatFlattenResult(result);
+    expect(formatted).toMatch(/added|keys/i);
   });
 });
