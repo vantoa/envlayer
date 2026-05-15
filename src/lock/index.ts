@@ -51,4 +51,16 @@ export function withLock<T>(
   }
 }
 
+/**
+ * Attempts to acquire a lock on the given layer without throwing on failure.
+ * Returns the LockResult directly so the caller can inspect success/error.
+ */
+export function tryLockLayer(
+  layer: string,
+  options?: LockOptions
+): LockResult {
+  const result = lockLayer(layer, options);
+  return result;
+}
+
 export type { EnvLock, LockMode, LockOptions, LockResult } from './types';
